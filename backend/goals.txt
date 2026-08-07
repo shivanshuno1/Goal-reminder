@@ -1,0 +1,18 @@
+{
+  "goals": [
+    {
+      "id": 1,
+      "text": "Write a blog post",
+      "active": false
+    },
+    {
+      "id": 2,
+      "text": "Review PRs",
+      "active": false
+    }
+  ],
+  "read_logs": [
+    "2026-08-07",
+    "2026-08-06"
+  ]
+}
