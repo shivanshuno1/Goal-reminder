@@ -3,6 +3,7 @@ import React, { useEffect, useState, useCallback } from "react";
 // Set this to your deployed Render backend URL, e.g.
 // https://goal-speaker-api.onrender.com
 const API_URL = "https://goal-reminder-zrl3.onrender.com";
+TIMEOUT_SECONDS = 45
 
 interface Goal {
   id: number;

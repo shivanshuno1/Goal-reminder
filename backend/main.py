@@ -1,65 +1,74 @@
 """
-Goal Speaker API (TXT-file backed)
-----------------------------------
-Stores goals and read logs in a single JSON-formatted .txt file.
-No SQLite, no SQLAlchemy — just plain file I/O.
+Goal Speaker API — Postgres-backed (Supabase free tier)
+--------------------------------------------------------
+Render's free tier has no persistent disk, so goals now live in a
+Postgres database (Supabase free tier) instead of a local file. Data
+survives service sleeps, restarts, and redeploys.
+
+Environment variable required:
+    DATABASE_URL = postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres
 
 Run locally:
+    export DATABASE_URL="postgresql://..."
     uvicorn main:app --reload
 
 Deploy on Render:
     Build command: pip install -r requirements.txt
     Start command: uvicorn main:app --host 0.0.0.0 --port $PORT
-
-⚠️  EPHEMERAL STORAGE WARNING (Render free tier):
-    The file system resets on every redeploy. For persistence,
-    mount a Render Disk or swap to a Postgres DB.
+    Environment variable: DATABASE_URL = your Supabase connection string
 """
 
-import json
 import os
 from datetime import date
-from typing import List, Optional
+from typing import List
 
+import psycopg2
+import psycopg2.extras
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# ----------------------------------------------------------------------
-# File-based storage
-# ----------------------------------------------------------------------
-DATA_FILE = "goals.txt"  # plain text file, but contains JSON inside
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is not set. "
+        "Add it in Render's Environment tab with your Supabase connection string."
+    )
 
 
-def _read_data():
-    """Read the entire data store from the txt file."""
-    if not os.path.exists(DATA_FILE):
-        # Initialise with empty structure
-        return {"goals": [], "read_logs": []}
-    try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        # If file is corrupt or empty, reset
-        return {"goals": [], "read_logs": []}
+def get_conn():
+    return psycopg2.connect(DATABASE_URL)
 
 
-def _write_data(data):
-    """Write the entire data store to the txt file (as pretty JSON)."""
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+def init_db():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS goals (
+            id SERIAL PRIMARY KEY,
+            text TEXT NOT NULL,
+            active BOOLEAN NOT NULL DEFAULT TRUE
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS read_logs (
+            read_date DATE PRIMARY KEY
+        )
+        """
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
 
 
-def _get_next_id(data):
-    """Return the next available goal ID."""
-    if not data["goals"]:
-        return 1
-    return max(g["id"] for g in data["goals"]) + 1
+init_db()
 
 
-# ----------------------------------------------------------------------
-# Pydantic schemas (unchanged)
-# ----------------------------------------------------------------------
+# --- Schemas -------------------------------------------------------------
 class GoalCreate(BaseModel):
     text: str
 
@@ -69,81 +78,92 @@ class GoalOut(BaseModel):
     text: str
     active: bool
 
-    # Pydantic v2: use `model_config` to enable attribute population
-    model_config = {"from_attributes": True}
-
 
 class StreakOut(BaseModel):
     read_today: bool
 
 
-# ----------------------------------------------------------------------
-# FastAPI app
-# ----------------------------------------------------------------------
-app = FastAPI(title="Goal Speaker API (TXT backend)")
+# --- App -------------------------------------------------------------
+app = FastAPI(title="Goal Speaker API (Postgres)")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten to your Vercel domain when live
+    allow_origins=["*"],  # tighten to your Vercel domain once deployed
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ----------------------------------------------------------------------
-# Endpoints
-# ----------------------------------------------------------------------
 @app.get("/goals", response_model=List[GoalOut])
 def list_goals():
-    data = _read_data()
-    # Return only active goals
-    return [g for g in data["goals"] if g["active"]]
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id, text, active FROM goals WHERE active = TRUE ORDER BY id")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
 
 
 @app.post("/goals", response_model=GoalOut)
 def create_goal(goal: GoalCreate):
-    data = _read_data()
-    new_goal = {
-        "id": _get_next_id(data),
-        "text": goal.text,
-        "active": True,
-    }
-    data["goals"].append(new_goal)
-    _write_data(data)
+    text = goal.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Goal text can't be empty")
+
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "INSERT INTO goals (text, active) VALUES (%s, TRUE) RETURNING id, text, active",
+        (text,),
+    )
+    new_goal = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
     return new_goal
 
 
 @app.delete("/goals/{goal_id}")
 def delete_goal(goal_id: int):
-    data = _read_data()
-    for g in data["goals"]:
-        if g["id"] == goal_id:
-            if not g["active"]:
-                raise HTTPException(status_code=404, detail="Goal not found")
-            g["active"] = False
-            _write_data(data)
-            return {"ok": True}
-    raise HTTPException(status_code=404, detail="Goal not found")
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE goals SET active = FALSE WHERE id = %s AND active = TRUE", (goal_id,))
+    if cur.rowcount == 0:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Goal not found")
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"ok": True}
 
 
 @app.post("/mark-read", response_model=StreakOut)
 def mark_read():
-    """Call this after the goals have been spoken aloud today."""
-    data = _read_data()
-    today = date.today().isoformat()  # "YYYY-MM-DD"
-
-    if today not in data["read_logs"]:
-        data["read_logs"].append(today)
-        _write_data(data)
-
+    today = date.today()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO read_logs (read_date) VALUES (%s) ON CONFLICT DO NOTHING",
+        (today,),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
     return {"read_today": True}
 
 
 @app.get("/streak", response_model=StreakOut)
 def get_streak():
-    data = _read_data()
-    today = date.today().isoformat()
-    return {"read_today": today in data["read_logs"]}
+    today = date.today()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM read_logs WHERE read_date = %s", (today,))
+    found = cur.fetchone() is not None
+    cur.close()
+    conn.close()
+    return {"read_today": found}
 
 
 @app.get("/")
