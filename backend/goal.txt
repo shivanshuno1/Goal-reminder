@@ -1,0 +1,49 @@
+{
+  "goals": [
+    {
+      "id": 1,
+      "text": "Write a blog post",
+      "active": false
+    },
+    {
+      "id": 2,
+      "text": "Review PRs",
+      "active": false
+    },
+    {
+      "id": 3,
+      "text": "Do SSC MOCK",
+      "active": true
+    },
+    {
+      "id": 4,
+      "text": "HARD GRIND DSA - TWO POINTER AND SLIDING WINDOWS",
+      "active": true
+    },
+    {
+      "id": 5,
+      "text": "COMPLETE LANGCHAIN TEXT-SPLITER AND START VECTOR STORE",
+      "active": true
+    },
+    {
+      "id": 6,
+      "text": "GO GYM",
+      "active": true
+    },
+    {
+      "id": 7,
+      "text": "MACHINE LEARNING RECAP",
+      "active": true
+    },
+    {
+      "id": 8,
+      "text": "DEPLOY THE GOAL-REMINDER AND MAKE IT FUNCTIONAL",
+      "active": true
+    }
+  ],
+  "read_logs": [
+    "2026-08-07",
+    "2026-08-06",
+    "2026-08-08"
+  ]
+}
