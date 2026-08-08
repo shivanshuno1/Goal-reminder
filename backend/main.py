@@ -28,7 +28,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = "postgresql://postgres:[Shivanshu18$]@db.sehwipocynkcnhfvfcno.supabase.co:5432/postgres"
 
 if not DATABASE_URL:
     raise RuntimeError(
