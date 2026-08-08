@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 
 // Set this to your deployed Render backend URL, e.g.
 // https://goal-speaker-api.onrender.com
-const API_URL = "http://localhost:8000";
+const API_URL = "https://goal-reminder-zrl3.onrender.com";
 
 interface Goal {
   id: number;
