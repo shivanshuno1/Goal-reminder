@@ -28,17 +28,17 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-DATABASE_URL = "postgresql://postgres:Shivanshu18$@db.sehwipocynkcnhfvfcno.supabase.co:5432/postgres"
-
-if not DATABASE_URL:
-    raise RuntimeError(
-        "DATABASE_URL environment variable is not set. "
-        "Add it in Render's Environment tab with your Supabase connection string."
-    )
+DATABASE_URL = "postgresql://postgres.sehwipocynkcnhfvfcno:Shivanshu18$@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
 
 
 def get_conn():
-    return psycopg2.connect(DATABASE_URL)
+    db_url = os.getenv("DATABASE_URL", DATABASE_URL)
+    if not db_url:
+        raise RuntimeError(
+            "DATABASE_URL environment variable is not set. "
+            "Set it in your environment (Render/Render, Vercel, or locally) with your Supabase connection string."
+        )
+    return psycopg2.connect(db_url)
 
 
 def init_db():
@@ -65,7 +65,8 @@ def init_db():
     conn.close()
 
 
-init_db()
+# Defer DB initialization to startup so the app doesn't crash during import
+# (e.g. when the network to the managed DB is temporarily unreachable).
 
 
 # --- Schemas -------------------------------------------------------------
@@ -92,6 +93,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def startup_event():
+    try:
+        init_db()
+    except Exception as e:
+        print(f"Warning: DB initialization failed on startup: {e}")
 
 
 @app.get("/goals", response_model=List[GoalOut])
